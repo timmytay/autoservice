@@ -1,0 +1,45 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Код склонирован из репозитория'
+            }
+        }
+
+        stage('Setup Python') {
+            steps {
+                echo 'Настройка Python окружения...'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo 'Установка зависимостей...'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                echo 'Запуск тестов...'
+                // Временно просто эхо, позже добавим реальные команды
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Сборка Docker образа...'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Все этапы выполнены успешно!'
+        }
+        failure {
+            echo 'Ошибка в пайплайне!'
+        }
+    }
+}
