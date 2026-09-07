@@ -23,7 +23,7 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     // Создаем виртуальное окружение
-                    bat 'python3 -m venv venv'
+                    bat 'python -m venv venv'
                     echo '✅ Виртуальное окружение создано'
                 }
             }
