@@ -38,6 +38,14 @@ pipeline {
                 }
             }
         }
+        stage('Check Django') {
+            steps {
+                dir("${env.PROJECT_DIR}") {
+                    bat 'venv\\Scripts\\activate && python manage.py check'
+                    bat 'venv\\Scripts\\activate && python manage.py showmigrations'
+                }
+            }
+        }
         stage('Run Migrations') {
             steps {
                 dir("${env.PROJECT_DIR}") {
