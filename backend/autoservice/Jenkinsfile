@@ -33,8 +33,8 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     // Устанавливаем зависимости из requirements.txt
-                    bat '. venv/bin/activate && pip install --upgrade pip'
-                    bat '. venv/bin/activate && pip install -r requirements.txt'
+                    bat 'venv\\Scripts\\activate && pip install --upgrade pip'
+                    bat 'venv\\Scripts\\activate && pip install -r requirements.txt'
                     echo '✅ Зависимости установлены'
                 }
             }
@@ -45,7 +45,7 @@ pipeline {
                 dir("${env.PROJECT_DIR}") {
                     // Запуск тестов Django (если они есть)
                     // Используем --keepdb для ускорения, если БД уже создана
-                    bat '. venv/bin/activate && python manage.py test --keepdb || true'
+                    bat 'venv\\Scripts\\activate && python manage.py test --keepdb || true'
                     // Временно добавляем || true, чтобы пайплайн не падал, если тестов нет
                     echo '✅ Тесты выполнены (заглушка)'
                 }
@@ -65,28 +65,28 @@ pipeline {
             }
         }
 
-        // Опциональный этап для публикации образа в реестр
-        // stage('Push Docker Image') {
-        //     steps {
-        //         script {
-        //             docker.withRegistry('', 'docker-hub-credentials') {
-        //                 docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
-        //                 docker.image("${DOCKER_IMAGE}:latest").push()
-        //             }
-        //             echo "✅ Образ отправлен в Docker Hub"
-        //         }
-        //     }
-        // }
+    // Опциональный этап для публикации образа в реестр
+    // stage('Push Docker Image') {
+    //     steps {
+    //         script {
+    //             docker.withRegistry('', 'docker-hub-credentials') {
+    //                 docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
+    //                 docker.image("${DOCKER_IMAGE}:latest").push()
+    //             }
+    //             echo "✅ Образ отправлен в Docker Hub"
+    //         }
+    //     }
+    // }
     }
 
     post {
         success {
             echo '🎉 Все этапы выполнены успешно!'
-            // Можно отправить уведомление, например, в Telegram или Slack
+        // Можно отправить уведомление, например, в Telegram или Slack
         }
         failure {
             echo '❌ Ошибка в пайплайне! Проверьте логи выше.'
-            // Можно отправить уведомление об ошибке
+        // Можно отправить уведомление об ошибке
         }
         always {
             // Действия, которые выполняются всегда, например, очистка
