@@ -70,11 +70,8 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Собираем Docker образ из корня репозитория
-                    // Предполагаем, что Dockerfile лежит в корне
-                    docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
-                    // Дополнительно помечаем как latest для удобства
-                    docker.build("${DOCKER_IMAGE}:latest")
+                    bat "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                    bat "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
                     echo "✅ Docker образ собран: ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 }
             }
