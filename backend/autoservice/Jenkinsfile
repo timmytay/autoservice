@@ -23,7 +23,7 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     // Создаем виртуальное окружение
-                    sh 'python3 -m venv venv'
+                    bat 'python3 -m venv venv'
                     echo '✅ Виртуальное окружение создано'
                 }
             }
@@ -33,8 +33,8 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     // Устанавливаем зависимости из requirements.txt
-                    sh '. venv/bin/activate && pip install --upgrade pip'
-                    sh '. venv/bin/activate && pip install -r requirements.txt'
+                    bat '. venv/bin/activate && pip install --upgrade pip'
+                    bat '. venv/bin/activate && pip install -r requirements.txt'
                     echo '✅ Зависимости установлены'
                 }
             }
@@ -45,7 +45,7 @@ pipeline {
                 dir("${env.PROJECT_DIR}") {
                     // Запуск тестов Django (если они есть)
                     // Используем --keepdb для ускорения, если БД уже создана
-                    sh '. venv/bin/activate && python manage.py test --keepdb || true'
+                    bat '. venv/bin/activate && python manage.py test --keepdb || true'
                     // Временно добавляем || true, чтобы пайплайн не падал, если тестов нет
                     echo '✅ Тесты выполнены (заглушка)'
                 }
