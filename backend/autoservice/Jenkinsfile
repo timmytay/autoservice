@@ -38,6 +38,13 @@ pipeline {
                 }
             }
         }
+        stage('Run Migrations') {
+            steps {
+                dir("${env.PROJECT_DIR}") {
+                    bat 'venv\\Scripts\\activate && python manage.py migrate'
+                }
+            }
+        }
 
         stage('Run Tests') {
             steps {
