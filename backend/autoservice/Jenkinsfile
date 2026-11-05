@@ -2,18 +2,23 @@ pipeline {
     agent any
 
     environment {
-        // Имя вашего образа на Docker Hub (измените на своё)
-        DOCKER_IMAGE = 'timmytay/autoservice'
-        // Тег будет содержать ветку и номер сборки для уникальности
-        DOCKER_TAG = "build-${env.BUILD_NUMBER}"
         // Путь к вашему Django проекту внутри репозитория
         PROJECT_DIR = 'backend'
+    }
+
+    // ==========================================
+    // ФИЧА 3: ТРИГГЕРЫ (Автозапуск)
+    // ==========================================
+    triggers {
+        // Запуск при получении вебхука от GitHub
+        githubPush()
+        // Страховка: опрос репозитория каждые 15 минут
+        pollSCM('H/15 * * * *')
     }
 
     stages {
         stage('Checkout') {
             steps {
-                // Реальное клонирование кода из репозитория
                 checkout scm
                 echo "✅ Код склонирован из ветки ${env.BRANCH_NAME}"
             }
@@ -34,74 +39,77 @@ pipeline {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python -m pip install --upgrade pip'
                     bat 'venv\\Scripts\\activate && pip install -r autoservice\\requirements.txt'
+                    // Устанавливаем pytest и плагины для строгих тестов
+                    bat 'venv\\Scripts\\activate && pip install pytest pytest-django pytest-cov'
                     echo '✅ Зависимости установлены'
                 }
             }
         }
-        stage('Check Django') {
+
+        stage('Check Django & Migrations') {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python manage.py check'
-                    bat 'venv\\Scripts\\activate && python manage.py showmigrations'
-                }
-            }
-        }
-        stage('Run Migrations') {
-            steps {
-                dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python manage.py makemigrations'
                     bat 'venv\\Scripts\\activate && python manage.py migrate'
+                    echo '✅ Миграции применены'
                 }
             }
         }
 
+        // ==========================================
+        // ФИЧА 2: СТРОГИЕ ТЕСТЫ
+        // ==========================================
         stage('Run Tests') {
             steps {
                 dir("${env.PROJECT_DIR}") {
-                    // Запуск тестов Django (если они есть)
-                    // Используем --keepdb для ускорения, если БД уже создана
-                    bat 'venv\\Scripts\\activate && python manage.py test --keepdb || true'
-                    // Временно добавляем || true, чтобы пайплайн не падал, если тестов нет
-                    echo '✅ Тесты выполнены (заглушка)'
+                    // Запускаем pytest. Если тесты упадут - пайплайн остановится!
+                    bat 'venv\\Scripts\\activate && pytest --cov=autoservice --cov-report=term'
+                    echo '✅ Все тесты успешно пройдены'
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        // ==========================================
+        // ФИЧА 1: ЛОГИКА ВЕТОК (Деплой только для main)
+        // ==========================================
+        stage('Deploy') {
+            when { 
+                // Выполняется ТОЛЬКО если это ветка main
+                branch 'main' 
+            }
             steps {
                 dir("${env.PROJECT_DIR}") {
-                    bat "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
-                    bat "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
-                    echo "✅ Docker образ собран: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    // Здесь может быть ваш скрипт деплоя. 
+                    // Для примера - просто вывод сообщения об успехе.
+                    // (Если нужно, верните сюда команды 'net stop FastAPI' и 'net start FastAPI')
+                    echo "🚀 Ветка main. Код готов к деплою на production!"
                 }
             }
         }
-
-    // Опциональный этап для публикации образа в реестр
-    // stage('Push Docker Image') {
-    //     steps {
-    //         script {
-    //             docker.withRegistry('', 'docker-hub-credentials') {
-    //                 docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").push()
-    //                 docker.image("${DOCKER_IMAGE}:latest").push()
-    //             }
-    //             echo "✅ Образ отправлен в Docker Hub"
-    //         }
-    //     }
-    // }
+        
+        // ==========================================
+        // Этап "Инфо" для всех остальных веток
+        // ==========================================
+        stage('Info') {
+            when {
+                not { branch 'main' }
+            }
+            steps {
+                echo "ℹ️ Это тестовая ветка (${env.BRANCH_NAME}). Деплой пропущен, тесты пройдены."
+            }
+        }
     }
 
     post {
         success {
-            echo '🎉 Все этапы выполнены успешно!'
-        // Можно отправить уведомление, например, в Telegram или Slack
+            echo "🎉 Пайплайн успешно завершен для ветки ${env.BRANCH_NAME}!"
         }
         failure {
-            echo '❌ Ошибка в пайплайне! Проверьте логи выше.'
-        // Можно отправить уведомление об ошибке
+            echo "❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошел сбой."
         }
         always {
-            // Действия, которые выполняются всегда, например, очистка
+            // Очищаем рабочее пространство после сборки
             cleanWs()
         }
     }
