@@ -2,13 +2,9 @@ pipeline {
     agent any
 
     environment {
-        // Путь к вашему Django проекту внутри репозитория
         PROJECT_DIR = 'backend'
     }
 
-    // ==========================================
-    // ТРИГГЕРЫ (Автозапуск)
-    // ==========================================
     triggers {
         githubPush()
         pollSCM('H/15 * * * *')
@@ -70,24 +66,30 @@ pipeline {
                 dir("${env.PROJECT_DIR}") {
                     bat '''
                         @echo off
-                        set PATH=%PATH%;C:\\Windows\\System32
+                        :: Добавляем в PATH папку с PowerShell и System32
+                        set PATH=%PATH%;C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0
                         
                         chcp 65001 > nul
                         echo "🛑 Остановка старого сервера (если запущен)..."
                         for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1 || echo "Старый сервер не найден"
                         
+                        :: Удаляем старые логи, чтобы не путаться
+                        if exist server.log del server.log
+                        if exist server_err.log del server_err.log
+                        
                         echo "🚀 Запуск нового сервера Django на порту 8000..."
                         
-                        :: ИСПОЛЬЗУЕМ ПРЯМЫЕ СЛЭШИ, ЧТОБЫ GROOVY НЕ РУГАЛСЯ
-                        powershell -Command "Start-Process -FilePath './venv/Scripts/python.exe' -ArgumentList 'manage.py runserver 0.0.0.0:8000' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
+                        :: Вызываем PowerShell по полному пути, чтобы Jenkins точно его нашел
+                        C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -Command "Start-Process -FilePath './venv/Scripts/python.exe' -ArgumentList 'manage.py runserver 0.0.0.0:8000' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
                         
                         echo "⏳ Ожидание запуска (5 секунд)..."
                         ping 127.0.0.1 -n 6 > nul
                         
                         echo "=== ЛОГ СЕРВЕРА ==="
-                        type server.log
+                        if exist server.log (type server.log) else (echo "Лог сервера пуст (возможно, сервер еще стартует)")
+                        
                         echo "=== ОШИБКИ СЕРВЕРА (если есть) ==="
-                        type server_err.log
+                        if exist server_err.log (type server_err.log) else (echo "Ошибок нет")
                     '''
                 }
             }
