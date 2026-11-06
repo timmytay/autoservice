@@ -80,6 +80,10 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat '''
+                        @echo off
+                        :: Принудительно добавляем системные пути Windows, так как Jenkins-служба их теряет
+                        set PATH=%PATH%;C:\Windows\System32
+                        
                         chcp 65001 > nul
                         echo "🛑 Остановка старого сервера (если запущен)..."
                         for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1 || echo "Старый сервер не найден"
@@ -121,6 +125,5 @@ pipeline {
         failure {
             echo "❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошел сбой."
         }
-        // ВАЖНО: cleanWs() удален, чтобы Jenkins не убивал папку с запущенным сервером!
     }
 }
