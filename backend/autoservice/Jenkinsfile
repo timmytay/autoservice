@@ -27,7 +27,6 @@ pipeline {
         stage('Setup Python') {
             steps {
                 dir("${env.PROJECT_DIR}") {
-                    // Создаем чистое виртуальное окружение
                     bat 'python -m venv venv'
                     echo '✅ Виртуальное окружение создано'
                 }
@@ -86,18 +85,18 @@ pipeline {
                         for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1 || echo "Старый сервер не найден"
                         
                         echo "🚀 Запуск нового сервера Django на порту 8000..."
-                        :: Говорим Jenkins не убивать процесс
-                        set BUILD_ID=dontKillMe
                         
-                        :: Запускаем сервер через cmd /c, чтобы логи писались в файл корректно
-                        start "" /B cmd /c "venv\\Scripts\\python.exe manage.py runserver 0.0.0.0:8000 > server.log 2>&1"
+                        :: Запускаем сервер через PowerShell, чтобы полностью отвязать его от Jenkins
+                        :: Jenkins убьет обычные дочерние процессы, а Start-Process создает независимый процесс
+                        powershell -Command "Start-Process -FilePath '.\venv\Scripts\python.exe' -ArgumentList 'manage.py runserver 0.0.0.0:8000' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
                         
                         echo "⏳ Ожидание запуска (5 секунд)..."
-                        :: Используем ping вместо timeout, так как timeout падает в Jenkins
                         ping 127.0.0.1 -n 6 > nul
                         
-                        echo "=== ЛОГ СЕРВЕРА (если он упал, ошибка будет тут) ==="
+                        echo "=== ЛОГ СЕРВЕРА ==="
                         type server.log
+                        echo "=== ОШИБКИ СЕРВЕРА (если есть) ==="
+                        type server_err.log
                     '''
                 }
             }
