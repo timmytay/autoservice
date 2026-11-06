@@ -38,9 +38,9 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python -m pip install --upgrade pip'
-                    bat 'venv\\Scripts\\activate && pip install -r autoservice\\requirements.txt'
-                    // Устанавливаем pytest и плагины для строгих тестов
-                    bat 'venv\\Scripts\\activate && pip install pytest pytest-django pytest-cov'
+                    // Добавлен --timeout 100 для защиты от сетевых сбоев
+                    bat 'venv\\Scripts\\activate && pip install --timeout 100 -r autoservice\\requirements.txt'
+                    bat 'venv\\Scripts\\activate && pip install --timeout 100 pytest pytest-django pytest-cov'
                     echo '✅ Зависимости установлены'
                 }
             }
@@ -85,12 +85,17 @@ pipeline {
                         for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1 || echo "Старый сервер не найден"
                         
                         echo "🚀 Запуск нового сервера Django на порту 8000..."
-                        start /B venv\\Scripts\\python.exe manage.py runserver 0.0.0.0:8000
+                        :: Говорим Jenkins не убивать процесс после завершения сборки
+                        set BUILD_ID=dontKillMe
+                        
+                        :: Запускаем сервер в фоне, перенаправляя логи в файл server.log
+                        start "" /B venv\\Scripts\\python.exe manage.py runserver 0.0.0.0:8000 > server.log 2>&1
                         
                         echo "⏳ Ожидание запуска (5 секунд)..."
                         timeout /t 5 >nul
                         
-                        echo "✅ Приложение успешно развернуто и доступно по адресу http://localhost:8000"
+                        echo "=== ЛОГ СЕРВЕРА (если он упал, ошибка будет тут) ==="
+                        type server.log
                     '''
                 }
             }
@@ -116,9 +121,6 @@ pipeline {
         failure {
             echo "❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошел сбой."
         }
-        always {
-            // Очищаем рабочее пространство после сборки
-            cleanWs()
-        }
+        // ВАЖНО: cleanWs() удален, чтобы Jenkins не убивал папку с запущенным сервером!
     }
 }
