@@ -81,8 +81,8 @@ pipeline {
                 dir("${env.PROJECT_DIR}") {
                     bat '''
                         @echo off
-                        :: Принудительно добавляем системные пути Windows, так как Jenkins-служба их теряет
-                        set PATH=%PATH%;C:\Windows\System32
+                        :: Двойные слэши нужны для Groovy, чтобы он не ругался
+                        set PATH=%PATH%;C:\\Windows\\System32
                         
                         chcp 65001 > nul
                         echo "🛑 Остановка старого сервера (если запущен)..."
