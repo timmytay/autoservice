@@ -38,7 +38,6 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python -m pip install --upgrade pip'
-                    // Добавлен --timeout 100 для защиты от сетевых сбоев
                     bat 'venv\\Scripts\\activate && pip install --timeout 100 -r autoservice\\requirements.txt'
                     bat 'venv\\Scripts\\activate && pip install --timeout 100 pytest pytest-django pytest-cov'
                     echo '✅ Зависимости установлены'
@@ -63,7 +62,6 @@ pipeline {
         stage('Run Tests') {
             steps {
                 dir("${env.PROJECT_DIR}") {
-                    // Запускаем pytest. Если тесты упадут - пайплайн остановится!
                     bat 'venv\\Scripts\\activate && pytest --cov=autoservice --cov-report=term'
                     echo '✅ Все тесты успешно пройдены'
                 }
@@ -81,7 +79,6 @@ pipeline {
                 dir("${env.PROJECT_DIR}") {
                     bat '''
                         @echo off
-                        :: Двойные слэши нужны для Groovy, чтобы он не ругался
                         set PATH=%PATH%;C:\\Windows\\System32
                         
                         chcp 65001 > nul
@@ -89,14 +86,15 @@ pipeline {
                         for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1 || echo "Старый сервер не найден"
                         
                         echo "🚀 Запуск нового сервера Django на порту 8000..."
-                        :: Говорим Jenkins не убивать процесс после завершения сборки
+                        :: Говорим Jenkins не убивать процесс
                         set BUILD_ID=dontKillMe
                         
-                        :: Запускаем сервер в фоне, перенаправляя логи в файл server.log
-                        start "" /B venv\\Scripts\\python.exe manage.py runserver 0.0.0.0:8000 > server.log 2>&1
+                        :: Запускаем сервер через cmd /c, чтобы логи писались в файл корректно
+                        start "" /B cmd /c "venv\\Scripts\\python.exe manage.py runserver 0.0.0.0:8000 > server.log 2>&1"
                         
                         echo "⏳ Ожидание запуска (5 секунд)..."
-                        timeout /t 5 >nul
+                        :: Используем ping вместо timeout, так как timeout падает в Jenkins
+                        ping 127.0.0.1 -n 6 > nul
                         
                         echo "=== ЛОГ СЕРВЕРА (если он упал, ошибка будет тут) ==="
                         type server.log
