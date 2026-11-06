@@ -10,9 +10,7 @@ pipeline {
     // ТРИГГЕРЫ (Автозапуск)
     // ==========================================
     triggers {
-        // Запуск при получении вебхука от GitHub
         githubPush()
-        // Страховка: опрос репозитория каждые 15 минут
         pollSCM('H/15 * * * *')
     }
 
@@ -55,9 +53,6 @@ pipeline {
             }
         }
 
-        // ==========================================
-        // СТРОГИЕ ТЕСТЫ
-        // ==========================================
         stage('Run Tests') {
             steps {
                 dir("${env.PROJECT_DIR}") {
@@ -67,9 +62,6 @@ pipeline {
             }
         }
 
-        // ==========================================
-        // ДЕПЛОЙ (Запуск реального приложения только для main)
-        // ==========================================
         stage('Deploy') {
             when { 
                 branch 'main' 
@@ -86,9 +78,8 @@ pipeline {
                         
                         echo "🚀 Запуск нового сервера Django на порту 8000..."
                         
-                        :: Запускаем сервер через PowerShell, чтобы полностью отвязать его от Jenkins
-                        :: Jenkins убьет обычные дочерние процессы, а Start-Process создает независимый процесс
-                        powershell -Command "Start-Process -FilePath '.\venv\Scripts\python.exe' -ArgumentList 'manage.py runserver 0.0.0.0:8000' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
+                        :: ИСПОЛЬЗУЕМ ПРЯМЫЕ СЛЭШИ, ЧТОБЫ GROOVY НЕ РУГАЛСЯ
+                        powershell -Command "Start-Process -FilePath './venv/Scripts/python.exe' -ArgumentList 'manage.py runserver 0.0.0.0:8000' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
                         
                         echo "⏳ Ожидание запуска (5 секунд)..."
                         ping 127.0.0.1 -n 6 > nul
@@ -102,9 +93,6 @@ pipeline {
             }
         }
         
-        // ==========================================
-        // Этап "Инфо" для всех остальных веток
-        // ==========================================
         stage('Info') {
             when {
                 not { branch 'main' }
