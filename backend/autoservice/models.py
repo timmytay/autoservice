@@ -6,6 +6,7 @@ class Client(models.Model):
     """Клиент автосервиса"""
     first_name = models.CharField('Имя', max_length=100)
     last_name = models.CharField('Фамилия', max_length=100)
+    father_name = models.CharField('Отчество', max_length=100, blank=True)
     phone = models.CharField('Телефон', max_length=20)
     email = models.EmailField('Email', blank=True)
     created_at = models.DateTimeField('Дата регистрации', auto_now_add=True)
@@ -17,7 +18,7 @@ class Client(models.Model):
         ordering = ['last_name', 'first_name']
 
     def __str__(self):
-        return f"{self.last_name} {self.first_name}"
+        return f"{self.last_name} {self.first_name} {self.father_name}"
 
 
 class Car(models.Model):
@@ -49,6 +50,7 @@ class Mechanic(models.Model):
     """Мастер автосервиса"""
     first_name = models.CharField('Имя', max_length=100)
     last_name = models.CharField('Фамилия', max_length=100)
+    father_name = models.CharField('Отчество', max_length=100, blank=True)
     phone = models.CharField('Телефон', max_length=20)
     specialization = models.CharField('Специализация', max_length=200)
     hire_date = models.DateField('Дата приема')
