@@ -44,8 +44,6 @@ class Car(models.Model):
 
     def __str__(self):
         return f"{self.brand} {self.model} ({self.license_plate})"
-
-
 class Mechanic(models.Model):
     """Мастер автосервиса"""
     first_name = models.CharField('Имя', max_length=100)
@@ -64,7 +62,7 @@ class Mechanic(models.Model):
         ordering = ['last_name', 'first_name']
 
     def __str__(self):
-        return f"{self.last_name} {self.first_name} ({self.specialization})"
+        return f"{self.last_name} {self.first_name} {self.father_name} ({self.specialization})"
 
 
 class Service(models.Model):
