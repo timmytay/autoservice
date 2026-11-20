@@ -1,28 +1,34 @@
 pipeline {
     agent any
 
-    environment {
-        PROJECT_DIR = 'backend'
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
-    triggers {
-        githubPush()
-        pollSCM('H/15 * * * *')
+    environment {
+        PROJECT_DIR      = 'backend'
+        PYTHONIOENCODING = 'utf-8'
+
+        // Docker Registry (GHCR)
+        ENABLE_DOCKER = 'true'
+        REGISTRY      = 'https://ghcr.io'
+        IMAGE_NAME    = 'ghcr.io/timmytay/autoservice'   // только нижний регистр
+        REG_CREDS     = 'ghcr-creds'                     // ID credentials в Jenkins
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
-                echo "✅ Код склонирован из ветки ${env.BRANCH_NAME}"
+                echo "✅ Код получен из ветки ${env.BRANCH_NAME}"
             }
         }
 
         stage('Setup Python') {
             steps {
                 dir("${env.PROJECT_DIR}") {
-                    bat 'python -m venv venv'
-                    echo '✅ Виртуальное окружение создано'
+                    bat 'if not exist venv\\Scripts\\python.exe python -m venv venv'
+                    echo '✅ Виртуальное окружение готово'
                 }
             }
         }
@@ -42,9 +48,10 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python manage.py check'
-                    bat 'venv\\Scripts\\activate && python manage.py makemigrations'
+                    // падает, если забыли закоммитить миграции
+                    bat 'venv\\Scripts\\activate && python manage.py makemigrations --check --dry-run'
                     bat 'venv\\Scripts\\activate && python manage.py migrate'
-                    echo '✅ Миграции применены'
+                    echo '✅ Миграции в порядке'
                 }
             }
         }
@@ -58,59 +65,119 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
-            when { 
-                branch 'main' 
+        // develop -> dev-N, release/* -> rc-N, main -> N + latest
+        stage('Docker Build & Push') {
+            when {
+                allOf {
+                    expression { env.ENABLE_DOCKER == 'true' }
+                    anyOf {
+                        branch 'develop'
+                        branch 'main'
+                        branch pattern: "release/*", comparator: "GLOB"
+                    }
+                }
             }
             steps {
-                dir("${env.PROJECT_DIR}") {
-                    bat '''
-                        @echo off
-                        :: Добавляем в PATH папку с PowerShell и System32
-                        set PATH=%PATH%;C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0
-                        
-                        chcp 65001 > nul
-                        echo "🛑 Остановка старого сервера (если запущен)..."
-                        for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1 || echo "Старый сервер не найден"
-                        
-                        :: Удаляем старые логи, чтобы не путаться
-                        if exist server.log del server.log
-                        if exist server_err.log del server_err.log
-                        
-                        echo "🚀 Запуск нового сервера Django на порту 8000..."
-                        
-                        :: Вызываем PowerShell по полному пути, чтобы Jenkins точно его нашел
-                        C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -Command "Start-Process -FilePath './venv/Scripts/python.exe' -ArgumentList 'manage.py runserver 0.0.0.0:8000' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
-                        
-                        echo "⏳ Ожидание запуска (5 секунд)..."
-                        ping 127.0.0.1 -n 6 > nul
-                        
-                        echo "=== ЛОГ СЕРВЕРА ==="
-                        if exist server.log (type server.log) else (echo "Лог сервера пуст (возможно, сервер еще стартует)")
-                        
-                        echo "=== ОШИБКИ СЕРВЕРА (если есть) ==="
-                        if exist server_err.log (type server_err.log) else (echo "Ошибок нет")
-                    '''
+                script {
+                    def tag
+                    if (env.BRANCH_NAME == 'main') {
+                        tag = "${env.BUILD_NUMBER}"
+                    } else if (env.BRANCH_NAME == 'develop') {
+                        tag = "dev-${env.BUILD_NUMBER}"
+                    } else {
+                        tag = "rc-${env.BUILD_NUMBER}"
+                    }
+
+                    def image = docker.build("${env.IMAGE_NAME}:${tag}", "./${env.PROJECT_DIR}")
+                    docker.withRegistry(env.REGISTRY, env.REG_CREDS) {
+                        image.push()
+                        if (env.BRANCH_NAME == 'main') {
+                            image.push('latest')
+                        }
+                    }
+                    echo "🐳 Образ ${env.IMAGE_NAME}:${tag} опубликован"
                 }
             }
         }
-        
-        stage('Info') {
+
+        // PROD: только main (hotfix/* сюда не попадает до мержа)
+        stage('Deploy (prod)') {
+            when { branch 'main' }
+            steps {
+                dir("${env.PROJECT_DIR}") {
+                    deployDjango('8000')
+                }
+            }
+        }
+
+        // STAGING: develop и release/*
+        stage('Deploy (staging)') {
             when {
-                not { branch 'main' }
+                anyOf {
+                    branch 'develop'
+                    branch pattern: "release/*", comparator: "GLOB"
+                }
             }
             steps {
-                echo "ℹ️ Это тестовая ветка (${env.BRANCH_NAME}). Деплой пропущен, тесты пройдены."
+                dir("${env.PROJECT_DIR}") {
+                    deployDjango('8001')
+                }
+            }
+        }
+
+        // feature/*, hotfix/*, PR-*: только тесты
+        stage('Info') {
+            when {
+                not {
+                    anyOf {
+                        branch 'main'
+                        branch 'develop'
+                        branch pattern: "release/*", comparator: "GLOB"
+                    }
+                }
+            }
+            steps {
+                echo "ℹ️ Ветка ${env.BRANCH_NAME}: тесты пройдены, деплой пропущен."
             }
         }
     }
 
     post {
         success {
-            echo "🎉 Пайплайн успешно завершен для ветки ${env.BRANCH_NAME}!"
+            echo "🎉 Пайплайн успешно завершён для ветки ${env.BRANCH_NAME}!"
         }
         failure {
-            echo "❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошел сбой."
+            echo "❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошёл сбой."
         }
+    }
+}
+
+// Останавливает старый runserver на порту и запускает новый.
+// Убивает и лаунчер venv, и дочерний python (иначе остаются блокировки файлов).
+def deployDjango(String port) {
+    withEnv(["DEPLOY_PORT=${port}"]) {
+        bat '''
+            @echo off
+            chcp 65001 > nul
+            echo Остановка старого сервера на порту %DEPLOY_PORT%...
+            powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*manage.py*runserver*0.0.0.0:%DEPLOY_PORT%*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+            ping 127.0.0.1 -n 4 > nul
+
+            if exist server.log del server.log
+            if exist server_err.log del server_err.log
+
+            echo Запуск нового сервера Django на порту %DEPLOY_PORT%...
+            set JENKINS_NODE_COOKIE=dontKillMe
+            set BUILD_ID=dontKillMe
+            powershell -NoProfile -Command "Start-Process -FilePath '.\\venv\\Scripts\\python.exe' -ArgumentList 'manage.py','runserver','0.0.0.0:%DEPLOY_PORT%','--noreload' -WorkingDirectory '%CD%' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
+            ping 127.0.0.1 -n 8 > nul
+
+            echo === ЛОГ СЕРВЕРА ===
+            if exist server.log type server.log
+            echo === ОШИБКИ СЕРВЕРА ===
+            if exist server_err.log type server_err.log
+
+            powershell -NoProfile -Command "if (Test-NetConnection 127.0.0.1 -Port %DEPLOY_PORT% -InformationLevel Quiet) { exit 0 } else { exit 1 }"
+        '''
     }
 }
