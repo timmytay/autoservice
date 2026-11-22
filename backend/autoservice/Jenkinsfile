@@ -67,34 +67,34 @@ pipeline {
 
         // develop -> dev-N, release/* -> rc-N, main -> N + latest
         stage('Docker Build & Push') {
-    when {
-        allOf {
-            expression { env.ENABLE_DOCKER == 'true' }
-            anyOf {
-                branch 'develop'
-                branch 'main'
-                branch pattern: "release/*", comparator: "GLOB"
+            when {
+                allOf {
+                    expression { env.ENABLE_DOCKER == 'true' }
+                    anyOf {
+                        branch 'develop'
+                        branch 'main'
+                        branch pattern: 'release/*', comparator: 'GLOB'
+                    }
+                }
             }
-        }
-    }
-    steps {
-        script {
-            def tag
-            if (env.BRANCH_NAME == 'main') {
-                tag = "${env.BUILD_NUMBER}"
+            steps {
+                script {
+                    def tag
+                    if (env.BRANCH_NAME == 'main') {
+                        tag = "${env.BUILD_NUMBER}"
             } else if (env.BRANCH_NAME == 'develop') {
-                tag = "dev-${env.BUILD_NUMBER}"
+                        tag = "dev-${env.BUILD_NUMBER}"
             } else {
-                tag = "rc-${env.BUILD_NUMBER}"
-            }
-            def image  = "${env.IMAGE_NAME}:${tag}"
-            def latest = "${env.IMAGE_NAME}:latest"
-            def isMain = (env.BRANCH_NAME == 'main')
+                        tag = "rc-${env.BUILD_NUMBER}"
+                    }
+                    def image  = "${env.IMAGE_NAME}:${tag}"
+                    def latest = "${env.IMAGE_NAME}:latest"
+                    def isMain = (env.BRANCH_NAME == 'main')
 
-            withCredentials([usernamePassword(credentialsId: env.REG_CREDS,
+                    withCredentials([usernamePassword(credentialsId: env.REG_CREDS,
                                               usernameVariable: 'REG_USER',
                                               passwordVariable: 'REG_PASS')]) {
-                bat """
+                        bat """
                     docker build -t ${image} ${env.PROJECT_DIR} || exit /b 1
                     echo %REG_PASS%| docker login ghcr.io -u %REG_USER% --password-stdin || exit /b 1
                     docker push ${image} || exit /b 1
@@ -104,11 +104,11 @@ pipeline {
                     )
                     docker logout ghcr.io
                 """
+                    }
+                    echo "🐳 Образ ${image} опубликован"
+                }
             }
-            echo "🐳 Образ ${image} опубликован"
         }
-    }
-}
         // PROD: только main (hotfix/* сюда не попадает до мержа)
         stage('Deploy (prod)') {
             when { branch 'main' }
@@ -124,7 +124,7 @@ pipeline {
             when {
                 anyOf {
                     branch 'develop'
-                    branch pattern: "release/*", comparator: "GLOB"
+                    branch pattern: 'release/*', comparator: 'GLOB'
                 }
             }
             steps {
@@ -141,7 +141,7 @@ pipeline {
                     anyOf {
                         branch 'main'
                         branch 'develop'
-                        branch pattern: "release/*", comparator: "GLOB"
+                        branch pattern: 'release/*', comparator: 'GLOB'
                     }
                 }
             }
@@ -156,7 +156,7 @@ pipeline {
             echo "🎉 Пайплайн успешно завершён для ветки ${env.BRANCH_NAME}!"
         }
         failure {
-            echo "❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошёл сбой."
+            echo '❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошёл сбой.'
         }
     }
 }
