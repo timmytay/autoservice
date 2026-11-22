@@ -4,6 +4,7 @@ pipeline {
     options {
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20'))
+        timeout(time: 5, unit: 'MINUTES')
     }
 
     environment {
@@ -163,6 +164,10 @@ pipeline {
         failure {
             echo 'Ошибка в пайплайне. Проверьте логи.'
         }
+
+        aborted {
+            echo 'Пайплайн остановлен вручную или по тайм-ауту.'
+        }
     }
 }
 
@@ -198,6 +203,9 @@ def deployDjango(int port) {
                     throw "Python executable not found: $python"
                 }
 
+                $stdin = Join-Path (Get-Location).Path "django-$port-input.txt"
+                Set-Content -Path $stdin -Value ""
+
                 $process = Start-Process `
                     -FilePath $python `
                     -ArgumentList @(
@@ -207,6 +215,7 @@ def deployDjango(int port) {
                         "--noreload"
                     ) `
                     -WorkingDirectory (Get-Location).Path `
+                    -RedirectStandardInput $stdin `
                     -RedirectStandardOutput "django-$port.log" `
                     -RedirectStandardError "django-$port-error.log" `
                     -WindowStyle Hidden `
@@ -236,6 +245,8 @@ def deployDjango(int port) {
                 }
 
                 Write-Output "Django is running on port $port"
+
+                exit 0
             '''
         }
     }
