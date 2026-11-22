@@ -11,9 +11,8 @@ pipeline {
         PYTHONIOENCODING = 'utf-8'
 
         ENABLE_DOCKER = 'true'
-        REGISTRY      = 'https://ghcr.io'
-        IMAGE_NAME    = 'ghcr.io/timmytay/autoservice'
-        REG_CREDS     = 'ghcr-creds'
+        REGISTRY      = 'localhost:5000'
+        IMAGE_NAME    = 'localhost:5000/autoservice'
     }
 
     stages {
@@ -73,6 +72,7 @@ pipeline {
                         branch 'main'
                         branch 'develop'
                         branch 'release/*'
+                        branch 'hotfix/*'
                     }
                 }
             }
@@ -85,43 +85,24 @@ pipeline {
                         tag = "${env.BUILD_NUMBER}"
                     } else if (env.BRANCH_NAME == 'develop') {
                         tag = "dev-${env.BUILD_NUMBER}"
+                    } else if (env.BRANCH_NAME.startsWith('hotfix/')) {
+                        tag = "hotfix-${env.BUILD_NUMBER}"
                     } else {
                         tag = "rc-${env.BUILD_NUMBER}"
                     }
 
                     def image = "${env.IMAGE_NAME}:${tag}"
                     def latest = "${env.IMAGE_NAME}:latest"
-                    def isMain = env.BRANCH_NAME == 'main'
 
-                    withCredentials([usernamePassword(
-                        credentialsId: env.REG_CREDS,
-                        usernameVariable: 'REG_USER',
-                        passwordVariable: 'REG_PASS'
-                    )]) {
-                        bat """
-                            docker build -t ${image} ${env.PROJECT_DIR} || exit /b 1
-                        """
+                    bat 'curl.exe --fail --silent --show-error http://localhost:5000/v2/'
 
-                        pwsh '''
-                            $env:REG_PASS | docker login ghcr.io -u $env:REG_USER --password-stdin
+                    bat "docker build -t ${image} ${env.PROJECT_DIR}"
 
-                            if ($LASTEXITCODE -ne 0) {
-                                exit $LASTEXITCODE
-                            }
-                        '''
+                    bat "docker push ${image}"
 
-                        try {
-                            bat """
-                                docker push ${image} || exit /b 1
-
-                                if "${isMain}"=="true" (
-                                    docker tag ${image} ${latest} || exit /b 1
-                                    docker push ${latest} || exit /b 1
-                                )
-                            """
-                        } finally {
-                            bat 'docker logout ghcr.io'
-                        }
+                    if (env.BRANCH_NAME == 'main') {
+                        bat "docker tag ${image} ${latest}"
+                        bat "docker push ${latest}"
                     }
 
                     echo "✅ Docker-образ опубликован: ${image}"
@@ -148,6 +129,7 @@ pipeline {
                 anyOf {
                     branch 'develop'
                     branch 'release/*'
+                    branch 'hotfix/*'
                 }
             }
 
@@ -165,6 +147,7 @@ pipeline {
                 echo """
                     Ветка: ${env.BRANCH_NAME}
                     Номер сборки: ${env.BUILD_NUMBER}
+                    Docker Registry: http://localhost:5000
                     Production: http://localhost:8000
                     Staging: http://localhost:8001
                 """
