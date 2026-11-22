@@ -173,13 +173,11 @@ pipeline {
 
 def deployDjango(int port) {
     dir("${env.PROJECT_DIR}") {
-        withEnv([
-            'JENKINS_NODE_COOKIE=dontKillMe',
-            "DEPLOY_PORT=${port}"
-        ]) {
+        withEnv(["DEPLOY_PORT=${port}"]) {
             pwsh '''
                 $ErrorActionPreference = "Stop"
                 $port = [int]$env:DEPLOY_PORT
+                $workDir = (Get-Location).Path
 
                 $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 
@@ -195,43 +193,29 @@ def deployDjango(int port) {
                     }
                 }
 
-                Start-Sleep -Seconds 2
-
-                $python = Join-Path (Get-Location).Path "venv\\Scripts\\python.exe"
+                $python = Join-Path $workDir "venv\\Scripts\\python.exe"
 
                 if (-not (Test-Path $python)) {
-                    throw "Python executable not found: $python"
+                    throw "Python executable not found"
                 }
 
-                $stdin = Join-Path (Get-Location).Path "django-$port-input.txt"
-                Set-Content -Path $stdin -Value ""
+                $command = '"' + $python + '" manage.py runserver 0.0.0.0:' + $port + ' --noreload'
 
-                $process = Start-Process `
-                    -FilePath $python `
-                    -ArgumentList @(
-                        "manage.py",
-                        "runserver",
-                        "0.0.0.0:$port",
-                        "--noreload"
-                    ) `
-                    -WorkingDirectory (Get-Location).Path `
-                    -RedirectStandardInput $stdin `
-                    -RedirectStandardOutput "django-$port.log" `
-                    -RedirectStandardError "django-$port-error.log" `
-                    -WindowStyle Hidden `
-                    -PassThru
+                $result = Invoke-CimMethod -ClassName Win32_Process `
+                    -MethodName Create `
+                    -Arguments @{
+                        CommandLine = $command
+                        CurrentDirectory = $workDir
+                    }
+
+                if ($result.ReturnValue -ne 0) {
+                    throw "Django launch failed: $($result.ReturnValue)"
+                }
 
                 $started = $false
 
                 for ($i = 0; $i -lt 30; $i++) {
                     Start-Sleep -Seconds 1
-
-                    $process.Refresh()
-
-                    if ($process.HasExited) {
-                        Get-Content "django-$port-error.log" -ErrorAction SilentlyContinue
-                        throw "Django process exited"
-                    }
 
                     if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
                         $started = $true
@@ -240,12 +224,10 @@ def deployDjango(int port) {
                 }
 
                 if (-not $started) {
-                    Get-Content "django-$port-error.log" -ErrorAction SilentlyContinue
                     throw "Django failed to start on port $port"
                 }
 
                 Write-Output "Django is running on port $port"
-
                 exit 0
             '''
         }
