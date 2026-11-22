@@ -10,11 +10,10 @@ pipeline {
         PROJECT_DIR      = 'backend'
         PYTHONIOENCODING = 'utf-8'
 
-        // Docker Registry (GHCR)
         ENABLE_DOCKER = 'true'
         REGISTRY      = 'https://ghcr.io'
-        IMAGE_NAME    = 'ghcr.io/timmytay/autoservice'   // только нижний регистр
-        REG_CREDS     = 'ghcr-creds'                     // ID credentials в Jenkins
+        IMAGE_NAME    = 'ghcr.io/timmytay/autoservice'
+        REG_CREDS     = 'ghcr-creds'
     }
 
     stages {
@@ -48,7 +47,6 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && python manage.py check'
-                    // падает, если забыли закоммитить миграции
                     bat 'venv\\Scripts\\activate && python manage.py makemigrations --check --dry-run'
                     bat 'venv\\Scripts\\activate && python manage.py migrate'
                     echo '✅ Миграции в порядке'
@@ -65,128 +63,175 @@ pipeline {
             }
         }
 
-        // develop -> dev-N, release/* -> rc-N, main -> N + latest
         stage('Docker Build & Push') {
             when {
                 allOf {
-                    expression { env.ENABLE_DOCKER == 'true' }
+                    expression {
+                        env.ENABLE_DOCKER == 'true'
+                    }
                     anyOf {
-                        branch 'develop'
                         branch 'main'
-                        branch pattern: 'release/*', comparator: 'GLOB'
+                        branch 'develop'
+                        branch 'release/*'
                     }
                 }
             }
+
             steps {
                 script {
                     def tag
+
                     if (env.BRANCH_NAME == 'main') {
                         tag = "${env.BUILD_NUMBER}"
-            } else if (env.BRANCH_NAME == 'develop') {
+                    } else if (env.BRANCH_NAME == 'develop') {
                         tag = "dev-${env.BUILD_NUMBER}"
-            } else {
+                    } else {
                         tag = "rc-${env.BUILD_NUMBER}"
                     }
-                    def image  = "${env.IMAGE_NAME}:${tag}"
+
+                    def image = "${env.IMAGE_NAME}:${tag}"
                     def latest = "${env.IMAGE_NAME}:latest"
-                    def isMain = (env.BRANCH_NAME == 'main')
+                    def isMain = env.BRANCH_NAME == 'main'
 
-                    withCredentials([usernamePassword(credentialsId: env.REG_CREDS,
-                                              usernameVariable: 'REG_USER',
-                                              passwordVariable: 'REG_PASS')]) {
+                    withCredentials([usernamePassword(
+                        credentialsId: env.REG_CREDS,
+                        usernameVariable: 'REG_USER',
+                        passwordVariable: 'REG_PASS'
+                    )]) {
                         bat """
-                    docker build -t ${image} ${env.PROJECT_DIR} || exit /b 1
-                    echo %REG_PASS%| docker login ghcr.io -u %REG_USER% --password-stdin || exit /b 1
-                    docker push ${image} || exit /b 1
-                    if "${isMain}"=="true" (
-                        docker tag ${image} ${latest} || exit /b 1
-                        docker push ${latest} || exit /b 1
-                    )
-                    docker logout ghcr.io
-                """
+                            docker build -t ${image} ${env.PROJECT_DIR} || exit /b 1
+                        """
+
+                        powershell '''
+                            $env:REG_PASS | docker login ghcr.io -u $env:REG_USER --password-stdin
+
+                            if ($LASTEXITCODE -ne 0) {
+                                exit $LASTEXITCODE
+                            }
+                        '''
+
+                        try {
+                            bat """
+                                docker push ${image} || exit /b 1
+
+                                if "${isMain}"=="true" (
+                                    docker tag ${image} ${latest} || exit /b 1
+                                    docker push ${latest} || exit /b 1
+                                )
+                            """
+                        } finally {
+                            bat 'docker logout ghcr.io'
+                        }
                     }
-                    echo "🐳 Образ ${image} опубликован"
-                }
-            }
-        }
-        // PROD: только main (hotfix/* сюда не попадает до мержа)
-        stage('Deploy (prod)') {
-            when { branch 'main' }
-            steps {
-                dir("${env.PROJECT_DIR}") {
-                    deployDjango('8000')
+
+                    echo "✅ Docker-образ опубликован: ${image}"
                 }
             }
         }
 
-        // STAGING: develop и release/*
+        stage('Deploy (prod)') {
+            when {
+                branch 'main'
+            }
+
+            steps {
+                script {
+                    deployDjango(8000)
+                }
+
+                echo '✅ Production развёрнут на порту 8000'
+            }
+        }
+
         stage('Deploy (staging)') {
             when {
                 anyOf {
                     branch 'develop'
-                    branch pattern: 'release/*', comparator: 'GLOB'
+                    branch 'release/*'
                 }
             }
+
             steps {
-                dir("${env.PROJECT_DIR}") {
-                    deployDjango('8001')
+                script {
+                    deployDjango(8001)
                 }
+
+                echo '✅ Staging развёрнут на порту 8001'
             }
         }
 
-        // feature/*, hotfix/*, PR-*: только тесты
         stage('Info') {
-            when {
-                not {
-                    anyOf {
-                        branch 'main'
-                        branch 'develop'
-                        branch pattern: 'release/*', comparator: 'GLOB'
-                    }
-                }
-            }
             steps {
-                echo "ℹ️ Ветка ${env.BRANCH_NAME}: тесты пройдены, деплой пропущен."
+                echo """
+                    Ветка: ${env.BRANCH_NAME}
+                    Номер сборки: ${env.BUILD_NUMBER}
+                    Production: http://localhost:8000
+                    Staging: http://localhost:8001
+                """
             }
         }
     }
 
     post {
         success {
-            echo "🎉 Пайплайн успешно завершён для ветки ${env.BRANCH_NAME}!"
+            echo '✅ Пайплайн успешно выполнен!'
         }
+
         failure {
             echo '❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошёл сбой.'
         }
     }
 }
 
-// Останавливает старый runserver на порту и запускает новый.
-// Убивает и лаунчер venv, и дочерний python (иначе остаются блокировки файлов).
-def deployDjango(String port) {
-    withEnv(["DEPLOY_PORT=${port}"]) {
-        bat '''
-            @echo off
-            chcp 65001 > nul
-            echo Остановка старого сервера на порту %DEPLOY_PORT%...
-            powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*manage.py*runserver*0.0.0.0:%DEPLOY_PORT%*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
-            ping 127.0.0.1 -n 4 > nul
+def deployDjango(int port) {
+    dir("${env.PROJECT_DIR}") {
+        withEnv([
+            'JENKINS_NODE_COOKIE=dontKillMe',
+            "DEPLOY_PORT=${port}"
+        ]) {
+            powershell '''
+                $port = [int]$env:DEPLOY_PORT
 
-            if exist server.log del server.log
-            if exist server_err.log del server_err.log
+                $connections = Get-NetTCPConnection `
+                    -LocalPort $port `
+                    -State Listen `
+                    -ErrorAction SilentlyContinue
 
-            echo Запуск нового сервера Django на порту %DEPLOY_PORT%...
-            set JENKINS_NODE_COOKIE=dontKillMe
-            set BUILD_ID=dontKillMe
-            powershell -NoProfile -Command "Start-Process -FilePath '.\\venv\\Scripts\\python.exe' -ArgumentList 'manage.py','runserver','0.0.0.0:%DEPLOY_PORT%','--noreload' -WorkingDirectory '%CD%' -WindowStyle Hidden -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_err.log'"
-            ping 127.0.0.1 -n 8 > nul
+                foreach ($connection in $connections) {
+                    Stop-Process `
+                        -Id $connection.OwningProcess `
+                        -Force `
+                        -ErrorAction SilentlyContinue
+                }
 
-            echo === ЛОГ СЕРВЕРА ===
-            if exist server.log type server.log
-            echo === ОШИБКИ СЕРВЕРА ===
-            if exist server_err.log type server_err.log
+                Start-Sleep -Seconds 2
 
-            powershell -NoProfile -Command "if (Test-NetConnection 127.0.0.1 -Port %DEPLOY_PORT% -InformationLevel Quiet) { exit 0 } else { exit 1 }"
-        '''
+                $python = Join-Path `
+                    (Get-Location).Path `
+                    "venv\\Scripts\\python.exe"
+
+                Start-Process `
+                    -FilePath $python `
+                    -ArgumentList @(
+                        "manage.py",
+                        "runserver",
+                        "0.0.0.0:$port",
+                        "--noreload"
+                    ) `
+                    -WorkingDirectory (Get-Location).Path `
+                    -RedirectStandardOutput "django-$port.log" `
+                    -RedirectStandardError "django-$port-error.log" `
+                    -WindowStyle Hidden
+
+                Start-Sleep -Seconds 3
+
+                if (-not (Get-NetTCPConnection `
+                    -LocalPort $port `
+                    -State Listen `
+                    -ErrorAction SilentlyContinue)) {
+                    throw "Django failed to start on port $port"
+                }
+            '''
+        }
     }
 }
