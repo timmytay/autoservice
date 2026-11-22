@@ -102,7 +102,7 @@ pipeline {
                             docker build -t ${image} ${env.PROJECT_DIR} || exit /b 1
                         """
 
-                        powershell '''
+                        pwsh '''
                             $env:REG_PASS | docker login ghcr.io -u $env:REG_USER --password-stdin
 
                             if ($LASTEXITCODE -ne 0) {
@@ -189,7 +189,7 @@ def deployDjango(int port) {
             'JENKINS_NODE_COOKIE=dontKillMe',
             "DEPLOY_PORT=${port}"
         ]) {
-            powershell '''
+            pwsh '''
                 $port = [int]$env:DEPLOY_PORT
 
                 $connections = Get-NetTCPConnection `
