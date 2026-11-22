@@ -8,17 +8,17 @@ pipeline {
 
     environment {
         PROJECT_DIR      = 'backend'
-        PYTHONIOENCODING = 'utf-8'
+        PYTHONIOENCODING  = 'utf-8'
 
         ENABLE_DOCKER = 'true'
         REGISTRY      = 'localhost:5000'
-        IMAGE_NAME    = 'localhost:5000/autoservice'
+        IMAGE_NAME    = 'autoservice'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo "✅ Код получен из ветки ${env.BRANCH_NAME}"
+                echo "Код получен из ветки ${env.BRANCH_NAME}"
             }
         }
 
@@ -26,7 +26,7 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'if not exist venv\\Scripts\\python.exe python -m venv venv'
-                    echo '✅ Виртуальное окружение готово'
+                    echo 'Виртуальное окружение готово'
                 }
             }
         }
@@ -37,7 +37,7 @@ pipeline {
                     bat 'venv\\Scripts\\activate && python -m pip install --upgrade pip'
                     bat 'venv\\Scripts\\activate && pip install --timeout 100 -r autoservice\\requirements.txt'
                     bat 'venv\\Scripts\\activate && pip install --timeout 100 pytest pytest-django pytest-cov'
-                    echo '✅ Зависимости установлены'
+                    echo 'Зависимости установлены'
                 }
             }
         }
@@ -48,7 +48,7 @@ pipeline {
                     bat 'venv\\Scripts\\activate && python manage.py check'
                     bat 'venv\\Scripts\\activate && python manage.py makemigrations --check --dry-run'
                     bat 'venv\\Scripts\\activate && python manage.py migrate'
-                    echo '✅ Миграции в порядке'
+                    echo 'Миграции в порядке'
                 }
             }
         }
@@ -57,7 +57,7 @@ pipeline {
             steps {
                 dir("${env.PROJECT_DIR}") {
                     bat 'venv\\Scripts\\activate && pytest --cov=autoservice --cov-report=term'
-                    echo '✅ Все тесты успешно пройдены'
+                    echo 'Все тесты успешно пройдены'
                 }
             }
         }
@@ -85,16 +85,16 @@ pipeline {
                         tag = "${env.BUILD_NUMBER}"
                     } else if (env.BRANCH_NAME == 'develop') {
                         tag = "dev-${env.BUILD_NUMBER}"
-                    } else if (env.BRANCH_NAME.startsWith('hotfix/')) {
-                        tag = "hotfix-${env.BUILD_NUMBER}"
                     } else {
-                        tag = "rc-${env.BUILD_NUMBER}"
+                        def branchTag = env.BRANCH_NAME
+                            .replaceAll('[^a-zA-Z0-9_.-]', '-')
+
+                        tag = "${branchTag}-${env.BUILD_NUMBER}"
                     }
 
-                    def image = "${env.IMAGE_NAME}:${tag}"
-                    def latest = "${env.IMAGE_NAME}:latest"
-
-                    bat 'curl.exe --fail --silent --show-error http://localhost:5000/v2/'
+                    def repository = "${env.REGISTRY}/${env.IMAGE_NAME}"
+                    def image = "${repository}:${tag}"
+                    def latest = "${repository}:latest"
 
                     bat "docker build -t ${image} ${env.PROJECT_DIR}"
 
@@ -105,7 +105,7 @@ pipeline {
                         bat "docker push ${latest}"
                     }
 
-                    echo "✅ Docker-образ опубликован: ${image}"
+                    echo "Docker-образ опубликован: ${image}"
                 }
             }
         }
@@ -120,7 +120,7 @@ pipeline {
                     deployDjango(8000)
                 }
 
-                echo '✅ Production развёрнут на порту 8000'
+                echo 'Production развёрнут на порту 8000'
             }
         }
 
@@ -138,7 +138,7 @@ pipeline {
                     deployDjango(8001)
                 }
 
-                echo '✅ Staging развёрнут на порту 8001'
+                echo 'Staging развёрнут на порту 8001'
             }
         }
 
@@ -147,7 +147,7 @@ pipeline {
                 echo """
                     Ветка: ${env.BRANCH_NAME}
                     Номер сборки: ${env.BUILD_NUMBER}
-                    Docker Registry: http://localhost:5000
+                    Docker Registry: http://${env.REGISTRY}
                     Production: http://localhost:8000
                     Staging: http://localhost:8001
                 """
@@ -157,11 +157,11 @@ pipeline {
 
     post {
         success {
-            echo '✅ Пайплайн успешно выполнен!'
+            echo 'Пайплайн успешно выполнен!'
         }
 
         failure {
-            echo '❌ Ошибка в пайплайне! Проверьте логи этапа, на котором произошёл сбой.'
+            echo 'Ошибка в пайплайне. Проверьте логи.'
         }
     }
 }
@@ -173,27 +173,32 @@ def deployDjango(int port) {
             "DEPLOY_PORT=${port}"
         ]) {
             pwsh '''
+                $ErrorActionPreference = "Stop"
                 $port = [int]$env:DEPLOY_PORT
 
-                $connections = Get-NetTCPConnection `
-                    -LocalPort $port `
-                    -State Listen `
-                    -ErrorAction SilentlyContinue
+                $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 
                 foreach ($connection in $connections) {
-                    Stop-Process `
-                        -Id $connection.OwningProcess `
-                        -Force `
-                        -ErrorAction SilentlyContinue
+                    $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
+
+                    if ($process) {
+                        if ($process.ProcessName -like "python*") {
+                            Stop-Process -Id $process.Id -Force
+                        } else {
+                            throw "Port $port is occupied by $($process.ProcessName)"
+                        }
+                    }
                 }
 
                 Start-Sleep -Seconds 2
 
-                $python = Join-Path `
-                    (Get-Location).Path `
-                    "venv\\Scripts\\python.exe"
+                $python = Join-Path (Get-Location).Path "venv\\Scripts\\python.exe"
 
-                Start-Process `
+                if (-not (Test-Path $python)) {
+                    throw "Python executable not found: $python"
+                }
+
+                $process = Start-Process `
                     -FilePath $python `
                     -ArgumentList @(
                         "manage.py",
@@ -204,16 +209,33 @@ def deployDjango(int port) {
                     -WorkingDirectory (Get-Location).Path `
                     -RedirectStandardOutput "django-$port.log" `
                     -RedirectStandardError "django-$port-error.log" `
-                    -WindowStyle Hidden
+                    -WindowStyle Hidden `
+                    -PassThru
 
-                Start-Sleep -Seconds 3
+                $started = $false
 
-                if (-not (Get-NetTCPConnection `
-                    -LocalPort $port `
-                    -State Listen `
-                    -ErrorAction SilentlyContinue)) {
+                for ($i = 0; $i -lt 30; $i++) {
+                    Start-Sleep -Seconds 1
+
+                    $process.Refresh()
+
+                    if ($process.HasExited) {
+                        Get-Content "django-$port-error.log" -ErrorAction SilentlyContinue
+                        throw "Django process exited"
+                    }
+
+                    if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+                        $started = $true
+                        break
+                    }
+                }
+
+                if (-not $started) {
+                    Get-Content "django-$port-error.log" -ErrorAction SilentlyContinue
                     throw "Django failed to start on port $port"
                 }
+
+                Write-Output "Django is running on port $port"
             '''
         }
     }
